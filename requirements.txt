@@ -1,0 +1,15 @@
+# Telegram
+aiogram>=3.13,<4
+
+# YouTube subtitles
+yt-dlp>=2025.1.26
+
+# HTTP (OpenRouter, Yandex Disk WebDAV)
+httpx[http2]>=0.27
+
+# DB + vectors
+asyncpg>=0.29
+pgvector>=0.3
+
+# Env
+python-dotenv>=1.0
