@@ -34,6 +34,7 @@ class Settings:
     chunk_max_chars: int = 900
     map_chunk_chars: int = 12000
     subtitle_langs: tuple[str, ...] = ("ru", "en")
+    voice_transcription_model: str = "openai/gpt-4o-audio-preview"
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -75,6 +76,9 @@ class Settings:
                 )
                 or ("ru", "en")
             ),
+            voice_transcription_model=os.environ.get(
+                "VOICE_TRANSCRIPTION_MODEL", "openai/gpt-4o-audio-preview"
+            ).strip(),
         )
 
 

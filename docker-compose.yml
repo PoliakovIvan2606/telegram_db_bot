@@ -10,5 +10,16 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
 
+  bot:
+    build: .
+    depends_on:
+      - postgres
+    env_file:
+      - .env
+    environment:
+      # Внутри сети compose хост БД — имя сервиса, не localhost
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/knowledge_bot
+    restart: unless-stopped
+
 volumes:
   pgdata:

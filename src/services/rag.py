@@ -77,3 +77,9 @@ def disk_path_for_manual(user_id: int, slug: str, suffix: str = "md") -> str:
     today = date.today().isoformat()
     safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in slug[:40])
     return f"knowledge/{user_id}/{today}_{safe}.{suffix}"
+
+
+def disk_path_for_voice(user_id: int, file_unique_id: str, suffix: str = "md") -> str:
+    today = date.today().isoformat()
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in file_unique_id[:48])
+    return f"knowledge/{user_id}/{today}_voice_{safe}.{suffix}"

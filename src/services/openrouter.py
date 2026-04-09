@@ -2,12 +2,49 @@
 
 from __future__ import annotations
 
+import base64
 import json
+import shutil
+import subprocess
 from typing import Any
 
 import httpx
 
 from config import Settings
+
+
+def _ogg_to_wav_via_ffmpeg(ogg_bytes: bytes) -> bytes:
+    """Telegram voice is OGG Opus; OpenAI audio input accepts only wav/mp3 (see API error)."""
+    if not shutil.which("ffmpeg"):
+        raise RuntimeError(
+            "Нужен ffmpeg в PATH: голос Telegram — это OGG, а выбранная модель принимает только WAV/MP3. "
+            "Установите ffmpeg (brew install ffmpeg) или смените VOICE_TRANSCRIPTION_MODEL на модель с поддержкой ogg."
+        )
+    proc = subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            "pipe:0",
+            "-f",
+            "wav",
+            "-acodec",
+            "pcm_s16le",
+            "pipe:1",
+        ],
+        input=ogg_bytes,
+        capture_output=True,
+        timeout=120,
+    )
+    if proc.returncode != 0:
+        err = (proc.stderr or b"").decode("utf-8", errors="replace")[:800]
+        raise RuntimeError(f"ffmpeg не смог конвертировать OGG→WAV: {err or proc.returncode}")
+    out = proc.stdout or b""
+    if len(out) < 100:
+        raise RuntimeError("ffmpeg вернул слишком короткий WAV; проверьте входное аудио.")
+    return out
 
 
 def _raise_for_openrouter_status(r: httpx.Response) -> None:
@@ -78,6 +115,55 @@ class OpenRouterClient:
                 "messages": [
                     {"role": "system", "content": system},
                     {"role": "user", "content": user},
+                ],
+            },
+        )
+        _raise_for_openrouter_status(r)
+        data = r.json()
+        try:
+            return str(data["choices"][0]["message"]["content"]).strip()
+        except (KeyError, IndexError, TypeError) as e:
+            raise RuntimeError(f"Unexpected OpenRouter response: {json.dumps(data)[:500]}") from e
+
+    async def transcribe_audio(
+        self,
+        *,
+        model: str,
+        audio_bytes: bytes,
+        audio_format: str = "ogg",
+    ) -> str:
+        """Speech-to-text via multimodal chat (OpenRouter input_audio)."""
+        payload_bytes = audio_bytes
+        fmt = audio_format
+        if audio_format.lower() == "ogg":
+            payload_bytes = _ogg_to_wav_via_ffmpeg(audio_bytes)
+            fmt = "wav"
+        b64 = base64.b64encode(payload_bytes).decode("ascii")
+        r = await self._client.post(
+            "/chat/completions",
+            json={
+                "model": model,
+                "temperature": 0,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": (
+                                    "Дословно расшифруй речь в этом аудио. "
+                                    "Сохраняй язык оригинала. Без перевода, без комментариев и вступлений — только текст."
+                                ),
+                            },
+                            {
+                                "type": "input_audio",
+                                "input_audio": {
+                                    "data": b64,
+                                    "format": fmt,
+                                },
+                            },
+                        ],
+                    }
                 ],
             },
         )

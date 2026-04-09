@@ -15,7 +15,12 @@ from services.openrouter import (
     summarize_long_transcript,
     summarize_short_text,
 )
-from services.rag import disk_path_for_manual, disk_path_for_youtube, index_text
+from services.rag import (
+    disk_path_for_manual,
+    disk_path_for_voice,
+    disk_path_for_youtube,
+    index_text,
+)
 from services.youtube_subs import fetch_youtube_transcript
 from services.yandex_webdav import YandexWebDAV
 
@@ -122,5 +127,60 @@ async def process_manual(
         return
     await message.answer(
         f"Сохранено. Чанков: {n}. Файл: `{disk_path}`",
+        parse_mode="Markdown",
+    )
+
+
+async def process_voice(
+    message: Message,
+    audio_bytes: bytes,
+    db: Database,
+    settings: Settings,
+    or_client: OpenRouterClient,
+    yandex: YandexWebDAV,
+) -> None:
+    if message.from_user is None or message.voice is None:
+        return
+    uid = message.voice.file_unique_id
+    source_ref = f"telegram-voice:{uid}"
+    await message.answer("Расшифровываю голос…")
+    try:
+        transcript = await or_client.transcribe_audio(
+            model=settings.voice_transcription_model,
+            audio_bytes=audio_bytes,
+            audio_format="ogg",
+        )
+    except Exception as e:
+        await message.answer(f"Ошибка OpenRouter: {e}")
+        return
+    if not transcript.strip():
+        await message.answer("Пустая расшифровка.")
+        return
+    disk_path = disk_path_for_voice(message.from_user.id, uid)
+    md = f"# Голосовое сообщение\n\n**Источник:** {source_ref}\n\n{transcript.strip()}\n"
+    if yandex.enabled:
+        try:
+            await yandex.put_text(disk_path, md)
+        except Exception as e:
+            await message.answer(f"Яндекс.Диск: {e}")
+    else:
+        disk_path = "(Yandex Disk отключён)"
+    await message.answer("Индексирую в базе…")
+    try:
+        n = await index_text(
+            db,
+            or_client,
+            settings,
+            user_id=message.from_user.id,
+            source_type="voice",
+            source_ref=source_ref,
+            title="Голосовое сообщение",
+            body=transcript.strip(),
+        )
+    except Exception as e:
+        await message.answer(f"Ошибка индексации: {e}")
+        return
+    await message.answer(
+        f"Готово. Чанков в базе: {n}. Файл: `{disk_path}`",
         parse_mode="Markdown",
     )

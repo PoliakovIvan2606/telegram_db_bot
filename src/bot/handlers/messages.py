@@ -1,11 +1,13 @@
-"""Non-command text: ingest (YouTube / заметка) или chat (RAG)."""
+"""Non-command text: ingest (YouTube / заметка / голос) или chat (RAG)."""
 
 from __future__ import annotations
+
+import io
 
 from aiogram import F, Router
 from aiogram.types import Message
 
-from bot.pipelines import process_manual, process_youtube
+from bot.pipelines import process_manual, process_voice, process_youtube
 from config import Settings
 from db.repo import Database
 from services.openrouter import OpenRouterClient, rag_answer
@@ -52,3 +54,29 @@ async def on_plain_text(
         return
     for chunk in _split_reply(answer):
         await message.answer(chunk)
+
+
+@router.message(F.voice)
+async def on_voice(
+    message: Message,
+    db: Database,
+    settings: Settings,
+    or_client: OpenRouterClient,
+    yandex: YandexWebDAV,
+) -> None:
+    if message.from_user is None or message.voice is None:
+        return
+    mode = await db.get_mode(message.from_user.id)
+    if mode != "ingest":
+        await message.answer(
+            "Голосовые для базы принимаются в режиме **ingest**. Переключите /mode.",
+            parse_mode="Markdown",
+        )
+        return
+    buf = io.BytesIO()
+    await message.bot.download(message.voice, destination=buf)
+    audio_bytes = buf.getvalue()
+    if not audio_bytes:
+        await message.answer("Не удалось скачать аудио.")
+        return
+    await process_voice(message, audio_bytes, db, settings, or_client, yandex)
